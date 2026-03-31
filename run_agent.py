@@ -74,12 +74,7 @@ from tools.browser_tool import cleanup_browser
 
 
 from hermes_constants import OPENROUTER_BASE_URL
-
-# Providers that use platform-specific auth (AWS SigV4, GCP ADC, etc.)
-# instead of API keys. These need opaque model ID passthrough and skip
-# the standard api_key/base_url validation. Keep in sync with
-# ProviderConfig.uses_platform_auth in hermes_cli/auth.py.
-_PLATFORM_AUTH_PROVIDERS = frozenset({"bedrock"})
+from hermes_cli.auth import is_platform_auth_provider
 
 # Agent internals extracted to agent/ package for modularity
 from agent.prompt_builder import (
@@ -591,7 +586,7 @@ class AIAgent:
         self.base_url = base_url or OPENROUTER_BASE_URL
         provider_name = provider.strip().lower() if isinstance(provider, str) and provider.strip() else None
         self.provider = provider_name or "openrouter"
-        self._uses_platform_auth = self.provider in _PLATFORM_AUTH_PROVIDERS
+        self._uses_platform_auth = is_platform_auth_provider(self.provider)
         self.acp_command = acp_command or command
         self.acp_args = list(acp_args or args or [])
         self._platform_credentials = platform_credentials or {}
