@@ -914,6 +914,7 @@ def select_provider_and_model():
         "copilot-acp": "GitHub Copilot ACP",
         "copilot": "GitHub Copilot",
         "anthropic": "Anthropic",
+        "bedrock": "AWS Bedrock",
         "zai": "Z.AI / GLM",
         "kimi-coding": "Kimi / Moonshot",
         "minimax": "MiniMax",
@@ -941,6 +942,7 @@ def select_provider_and_model():
         ("copilot-acp", "GitHub Copilot ACP (spawns `copilot --acp --stdio`)"),
         ("copilot", "GitHub Copilot (uses GITHUB_TOKEN or gh auth token)"),
         ("anthropic", "Anthropic (Claude models — API key or Claude Code)"),
+        ("bedrock", "AWS Bedrock (Claude models via AWS credentials)"),
         ("zai", "Z.AI / GLM (Zhipu AI direct API)"),
         ("kimi-coding", "Kimi / Moonshot (Moonshot AI direct API)"),
         ("minimax", "MiniMax (global direct API)"),
@@ -1021,6 +1023,8 @@ def select_provider_and_model():
         _remove_custom_provider(config)
     elif selected_provider == "anthropic":
         _model_flow_anthropic(config, current_model)
+    elif selected_provider == "bedrock":
+        _model_flow_bedrock(config, current_model)
     elif selected_provider == "kimi-coding":
         _model_flow_kimi(config, current_model)
     elif selected_provider in ("zai", "minimax", "minimax-cn", "kilocode", "opencode-zen", "opencode-go", "ai-gateway", "alibaba", "huggingface"):
@@ -2330,6 +2334,115 @@ def _run_anthropic_oauth_flow(save_env_value):
             return True
         print("  Cancelled — install Claude Code and try again.")
         return False
+
+
+def _model_flow_bedrock(config, current_model=""):
+    """Flow for AWS Bedrock provider — configure AWS credentials and pick a model."""
+    import os
+    from hermes_cli.auth import (
+        _prompt_model_selection, _save_model_choice, deactivate_provider,
+        has_usable_secret,
+    )
+    from hermes_cli.config import get_env_value, save_env_value, load_config, save_config
+    from hermes_cli.models import _PROVIDER_MODELS
+
+    existing_access_key = (
+        get_env_value("AWS_ACCESS_KEY_ID")
+        or os.getenv("AWS_ACCESS_KEY_ID", "")
+    ).strip()
+    existing_secret_key = (
+        get_env_value("AWS_SECRET_ACCESS_KEY")
+        or os.getenv("AWS_SECRET_ACCESS_KEY", "")
+    ).strip()
+    has_creds = has_usable_secret(existing_access_key) and has_usable_secret(existing_secret_key)
+
+    if has_creds:
+        print(f"  AWS Access Key ID: {existing_access_key[:8]}... ✓")
+        print()
+        print("    1. Use existing credentials")
+        print("    2. Enter new credentials")
+        print("    3. Cancel")
+        print()
+        try:
+            choice = input("  Choice [1/2/3]: ").strip()
+        except (KeyboardInterrupt, EOFError):
+            choice = "1"
+
+        if choice == "2":
+            has_creds = False
+        elif choice == "3":
+            return
+
+    if not has_creds:
+        print()
+        print("  Configure AWS credentials for Bedrock.")
+        print("  Get access keys at: https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html")
+        print()
+        try:
+            access_key = input("  AWS Access Key ID: ").strip()
+        except (KeyboardInterrupt, EOFError):
+            print()
+            return
+        if not access_key:
+            print("  Cancelled.")
+            return
+        try:
+            import getpass
+            secret_key = getpass.getpass("  AWS Secret Access Key: ").strip()
+        except (KeyboardInterrupt, EOFError):
+            print()
+            return
+        if not secret_key:
+            print("  Cancelled.")
+            return
+
+        save_env_value("AWS_ACCESS_KEY_ID", access_key)
+        save_env_value("AWS_SECRET_ACCESS_KEY", secret_key)
+
+        try:
+            session_token = input("  AWS Session Token (optional, press Enter to skip): ").strip()
+        except (KeyboardInterrupt, EOFError):
+            session_token = ""
+        if session_token:
+            save_env_value("AWS_SESSION_TOKEN", session_token)
+
+        existing_region = (
+            get_env_value("AWS_REGION")
+            or os.getenv("AWS_REGION", "")
+            or os.getenv("AWS_DEFAULT_REGION", "")
+        ).strip()
+        default_region = existing_region or "us-east-1"
+        try:
+            region = input(f"  AWS Region [{default_region}]: ").strip()
+        except (KeyboardInterrupt, EOFError):
+            region = ""
+        region = region or default_region
+        save_env_value("AWS_REGION", region)
+        print("  ✓ AWS credentials saved.")
+
+    print()
+
+    # Model selection (_prompt_model_selection has a built-in "Enter custom model name" option)
+    model_list = _PROVIDER_MODELS.get("bedrock", [])
+    selected = _prompt_model_selection(model_list, current_model=current_model)
+
+    if selected:
+        _save_model_choice(selected)
+
+        cfg = load_config()
+        model = cfg.get("model")
+        if not isinstance(model, dict):
+            model = {"default": model} if model else {}
+            cfg["model"] = model
+        model["provider"] = "bedrock"
+        model["api_mode"] = "anthropic_messages"
+        model.pop("base_url", None)
+        save_config(cfg)
+        deactivate_provider()
+        print(f"  ✓ Default model set to: {selected}")
+        print("  ✓ Provider: AWS Bedrock")
+    else:
+        print("  No change.")
 
 
 def _model_flow_anthropic(config, current_model=""):

@@ -127,6 +127,10 @@ def resolve_turn_route(user_message: str, routing_config: Optional[Dict[str, Any
                 "api_mode": primary.get("api_mode"),
                 "command": primary.get("command"),
                 "args": list(primary.get("args") or []),
+                "aws_access_key": primary.get("aws_access_key", ""),
+                "aws_secret_key": primary.get("aws_secret_key", ""),
+                "aws_session_token": primary.get("aws_session_token", ""),
+                "aws_region": primary.get("aws_region", ""),
             },
             "label": None,
             "signature": (
@@ -162,6 +166,10 @@ def resolve_turn_route(user_message: str, routing_config: Optional[Dict[str, Any
                 "api_mode": primary.get("api_mode"),
                 "command": primary.get("command"),
                 "args": list(primary.get("args") or []),
+                "aws_access_key": primary.get("aws_access_key", ""),
+                "aws_secret_key": primary.get("aws_secret_key", ""),
+                "aws_session_token": primary.get("aws_session_token", ""),
+                "aws_region": primary.get("aws_region", ""),
             },
             "label": None,
             "signature": (

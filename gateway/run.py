@@ -299,6 +299,10 @@ def _resolve_runtime_agent_kwargs() -> dict:
         "command": runtime.get("command"),
         "args": list(runtime.get("args") or []),
         "credential_pool": runtime.get("credential_pool"),
+        "aws_access_key": runtime.get("aws_access_key", ""),
+        "aws_secret_key": runtime.get("aws_secret_key", ""),
+        "aws_session_token": runtime.get("aws_session_token", ""),
+        "aws_region": runtime.get("aws_region", ""),
     }
 
 
@@ -646,7 +650,7 @@ class GatewayRunner:
 
             from run_agent import AIAgent
             runtime_kwargs = _resolve_runtime_agent_kwargs()
-            if not runtime_kwargs.get("api_key"):
+            if not runtime_kwargs.get("api_key") and runtime_kwargs.get("provider") != "bedrock":
                 return
 
             # Resolve model from config — AIAgent's default is OpenRouter-
@@ -788,6 +792,10 @@ class GatewayRunner:
             "api_mode": runtime_kwargs.get("api_mode"),
             "command": runtime_kwargs.get("command"),
             "args": list(runtime_kwargs.get("args") or []),
+            "aws_access_key": runtime_kwargs.get("aws_access_key", ""),
+            "aws_secret_key": runtime_kwargs.get("aws_secret_key", ""),
+            "aws_session_token": runtime_kwargs.get("aws_session_token", ""),
+            "aws_region": runtime_kwargs.get("aws_region", ""),
         }
         return resolve_turn_route(user_message, getattr(self, "_smart_model_routing", {}), primary)
 
@@ -3934,7 +3942,7 @@ class GatewayRunner:
 
         try:
             runtime_kwargs = _resolve_runtime_agent_kwargs()
-            if not runtime_kwargs.get("api_key"):
+            if not runtime_kwargs.get("api_key") and runtime_kwargs.get("provider") != "bedrock":
                 await adapter.send(
                     source.chat_id,
                     f"❌ Background task {task_id} failed: no provider credentials configured.",
@@ -4100,7 +4108,7 @@ class GatewayRunner:
 
         try:
             runtime_kwargs = _resolve_runtime_agent_kwargs()
-            if not runtime_kwargs.get("api_key"):
+            if not runtime_kwargs.get("api_key") and runtime_kwargs.get("provider") != "bedrock":
                 await adapter.send(
                     source.chat_id,
                     "❌ /btw failed: no provider credentials configured.",
@@ -4377,7 +4385,7 @@ class GatewayRunner:
             from agent.model_metadata import estimate_messages_tokens_rough
 
             runtime_kwargs = _resolve_runtime_agent_kwargs()
-            if not runtime_kwargs.get("api_key"):
+            if not runtime_kwargs.get("api_key") and runtime_kwargs.get("provider") != "bedrock":
                 return "No provider configured -- cannot compress."
 
             # Resolve model from config (same reason as memory flush above).

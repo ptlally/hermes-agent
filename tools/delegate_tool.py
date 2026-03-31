@@ -205,6 +205,10 @@ def _build_child_agent(
     effective_api_mode = override_api_mode or getattr(parent_agent, "api_mode", None)
     effective_acp_command = getattr(parent_agent, "acp_command", None)
     effective_acp_args = list(getattr(parent_agent, "acp_args", []) or [])
+    effective_aws_access_key = getattr(parent_agent, "_aws_access_key", "")
+    effective_aws_secret_key = getattr(parent_agent, "_aws_secret_key", "")
+    effective_aws_session_token = getattr(parent_agent, "_aws_session_token", "")
+    effective_aws_region = getattr(parent_agent, "_aws_region", "")
 
     child = AIAgent(
         base_url=effective_base_url,
@@ -214,6 +218,10 @@ def _build_child_agent(
         api_mode=effective_api_mode,
         acp_command=effective_acp_command,
         acp_args=effective_acp_args,
+        aws_access_key=effective_aws_access_key,
+        aws_secret_key=effective_aws_secret_key,
+        aws_session_token=effective_aws_session_token,
+        aws_region=effective_aws_region,
         max_iterations=max_iterations,
         max_tokens=getattr(parent_agent, "max_tokens", None),
         reasoning_config=getattr(parent_agent, "reasoning_config", None),
