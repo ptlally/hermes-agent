@@ -83,7 +83,7 @@ class ProviderConfig:
     """Describes a known inference provider."""
     id: str
     name: str
-    auth_type: str  # "oauth_device_code", "oauth_external", or "api_key"
+    auth_type: str  # "oauth_device_code", "oauth_external", "api_key", or "aws_credentials"
     portal_base_url: str = ""
     inference_base_url: str = ""
     client_id: str = ""
@@ -93,6 +93,10 @@ class ProviderConfig:
     api_key_env_vars: tuple = ()
     # Optional env var for base URL override
     base_url_env_var: str = ""
+    # True for providers that use platform-specific auth (AWS SigV4, GCP
+    # ADC, etc.) instead of API keys.  These skip api_key/base_url
+    # validation and pass model IDs through untransformed.
+    uses_platform_auth: bool = False
 
 
 PROVIDER_REGISTRY: Dict[str, ProviderConfig] = {
@@ -225,10 +229,17 @@ PROVIDER_REGISTRY: Dict[str, ProviderConfig] = {
         name="AWS Bedrock",
         auth_type="aws_credentials",
         inference_base_url="",
-        api_key_env_vars=(),  # Not an API-key provider; uses AWS SigV4 via AnthropicBedrock
+        api_key_env_vars=(),
         base_url_env_var="",
+        uses_platform_auth=True,
     ),
 }
+
+
+def is_platform_auth_provider(provider_id: str) -> bool:
+    """Check if a provider uses platform-specific auth instead of API keys."""
+    pconfig = PROVIDER_REGISTRY.get(provider_id)
+    return pconfig.uses_platform_auth if pconfig else False
 
 
 # =============================================================================

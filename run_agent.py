@@ -75,6 +75,12 @@ from tools.browser_tool import cleanup_browser
 
 from hermes_constants import OPENROUTER_BASE_URL
 
+# Providers that use platform-specific auth (AWS SigV4, GCP ADC, etc.)
+# instead of API keys. These need opaque model ID passthrough and skip
+# the standard api_key/base_url validation. Keep in sync with
+# ProviderConfig.uses_platform_auth in hermes_cli/auth.py.
+_PLATFORM_AUTH_PROVIDERS = frozenset({"bedrock"})
+
 # Agent internals extracted to agent/ package for modularity
 from agent.prompt_builder import (
     DEFAULT_AGENT_IDENTITY, PLATFORM_HINTS,
@@ -506,10 +512,7 @@ class AIAgent:
         iteration_budget: "IterationBudget" = None,
         fallback_model: Dict[str, Any] = None,
         credential_pool=None,
-        aws_access_key: str = "",
-        aws_secret_key: str = "",
-        aws_session_token: str = "",
-        aws_region: str = "",
+        platform_credentials: dict = None,
         checkpoints_enabled: bool = False,
         checkpoint_max_snapshots: int = 50,
         pass_session_id: bool = False,
@@ -588,12 +591,10 @@ class AIAgent:
         self.base_url = base_url or OPENROUTER_BASE_URL
         provider_name = provider.strip().lower() if isinstance(provider, str) and provider.strip() else None
         self.provider = provider_name or "openrouter"
+        self._uses_platform_auth = self.provider in _PLATFORM_AUTH_PROVIDERS
         self.acp_command = acp_command or command
         self.acp_args = list(acp_args or args or [])
-        self._aws_access_key = aws_access_key or ""
-        self._aws_secret_key = aws_secret_key or ""
-        self._aws_session_token = aws_session_token or ""
-        self._aws_region = aws_region or "us-east-1"
+        self._platform_credentials = platform_credentials or {}
         if api_mode in {"chat_completions", "codex_responses", "anthropic_messages"}:
             self.api_mode = api_mode
         elif self.provider == "bedrock":
@@ -799,11 +800,12 @@ class AIAgent:
         if self.api_mode == "anthropic_messages":
             if self.provider == "bedrock":
                 from agent.anthropic_adapter import build_anthropic_bedrock_client
+                _pc = self._platform_credentials
                 self._anthropic_client = build_anthropic_bedrock_client(
-                    aws_access_key=self._aws_access_key,
-                    aws_secret_key=self._aws_secret_key,
-                    aws_session_token=self._aws_session_token,
-                    aws_region=self._aws_region,
+                    aws_access_key=_pc.get("aws_access_key", ""),
+                    aws_secret_key=_pc.get("aws_secret_key", ""),
+                    aws_session_token=_pc.get("aws_session_token", ""),
+                    aws_region=_pc.get("aws_region", "us-east-1"),
                 )
                 self._is_anthropic_oauth = False
                 self._anthropic_api_key = ""
@@ -811,7 +813,7 @@ class AIAgent:
                 self.client = None
                 self._client_kwargs = {}
                 if not self.quiet_mode:
-                    print(f"🤖 AI Agent initialized with model: {self.model} (AWS Bedrock, {self._aws_region})")
+                    print(f"🤖 AI Agent initialized with model: {self.model} (AWS Bedrock, {_pc.get('aws_region', 'us-east-1')})")
             else:
                 from agent.anthropic_adapter import build_anthropic_client, resolve_anthropic_token
                 # Only fall back to ANTHROPIC_TOKEN when the provider is actually Anthropic.
@@ -4771,7 +4773,7 @@ class AIAgent:
                 reasoning_config=self.reasoning_config,
                 is_oauth=self._is_anthropic_oauth,
                 preserve_dots=self._anthropic_preserve_dots(),
-                is_bedrock=(self.provider == "bedrock"),
+                preserve_model_id=self._uses_platform_auth,
                 context_length=ctx_len,
             )
 
@@ -5263,7 +5265,7 @@ class AIAgent:
                     tools=[memory_tool_def], max_tokens=5120,
                     reasoning_config=None,
                     preserve_dots=self._anthropic_preserve_dots(),
-                    is_bedrock=(self.provider == "bedrock"),
+                    preserve_model_id=self._uses_platform_auth,
                 )
                 response = self._anthropic_messages_create(ant_kwargs)
             elif not _aux_available:
@@ -6094,7 +6096,7 @@ class AIAgent:
                                    max_tokens=self.max_tokens, reasoning_config=self.reasoning_config,
                                    is_oauth=self._is_anthropic_oauth,
                                    preserve_dots=self._anthropic_preserve_dots(),
-                                   is_bedrock=(self.provider == "bedrock"))
+                                   preserve_model_id=self._uses_platform_auth)
                     summary_response = self._anthropic_messages_create(_ant_kw)
                     _msg, _ = _nar(summary_response, strip_tool_prefix=self._is_anthropic_oauth)
                     final_response = (_msg.content or "").strip()
@@ -6127,7 +6129,7 @@ class AIAgent:
                                     is_oauth=self._is_anthropic_oauth,
                                     max_tokens=self.max_tokens, reasoning_config=self.reasoning_config,
                                     preserve_dots=self._anthropic_preserve_dots(),
-                                    is_bedrock=(self.provider == "bedrock"))
+                                    preserve_model_id=self._uses_platform_auth)
                     retry_response = self._anthropic_messages_create(_ant_kw2)
                     _retry_msg, _ = _nar2(retry_response, strip_tool_prefix=self._is_anthropic_oauth)
                     final_response = (_retry_msg.content or "").strip()

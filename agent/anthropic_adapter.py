@@ -830,17 +830,20 @@ def refresh_hermes_oauth_token() -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 
-def normalize_model_name(model: str, preserve_dots: bool = False, is_bedrock: bool = False) -> str:
+def normalize_model_name(model: str, preserve_dots: bool = False, preserve_model_id: bool = False) -> str:
     """Normalize a model name for the Anthropic API.
 
-    - When is_bedrock is True, returns the model name unchanged (Bedrock
-      uses its own model ID format like us.anthropic.claude-opus-4-6-v1).
+    When preserve_model_id is True, returns the model name unchanged.
+    Platform-auth providers (Bedrock, Vertex, etc.) use opaque model IDs
+    that must not be transformed.
+
+    Otherwise:
     - Strips 'anthropic/' prefix (OpenRouter format, case-insensitive)
     - Converts dots to hyphens in version numbers (OpenRouter uses dots,
       Anthropic uses hyphens: claude-opus-4.6 → claude-opus-4-6), unless
       preserve_dots is True (e.g. for Alibaba/DashScope: qwen3.5-plus).
     """
-    if is_bedrock:
+    if preserve_model_id:
         return model
     lower = model.lower()
     if lower.startswith("anthropic/"):
@@ -1194,7 +1197,7 @@ def build_anthropic_kwargs(
     tool_choice: Optional[str] = None,
     is_oauth: bool = False,
     preserve_dots: bool = False,
-    is_bedrock: bool = False,
+    preserve_model_id: bool = False,
     context_length: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Build kwargs for anthropic.messages.create().
@@ -1210,13 +1213,14 @@ def build_anthropic_kwargs(
     When *preserve_dots* is True, model name dots are not converted to hyphens
     (for Alibaba/DashScope anthropic-compatible endpoints: qwen3.5-plus).
 
-    When *is_bedrock* is True, the model name is passed through unchanged
-    (Bedrock uses its own model ID format).
+    When *preserve_model_id* is True, the model name is passed through
+    unchanged. Platform-auth providers (Bedrock, Vertex, etc.) use opaque
+    model IDs that must not be transformed.
     """
     system, anthropic_messages = convert_messages_to_anthropic(messages)
     anthropic_tools = convert_tools_to_anthropic(tools) if tools else []
 
-    model = normalize_model_name(model, preserve_dots=preserve_dots, is_bedrock=is_bedrock)
+    model = normalize_model_name(model, preserve_dots=preserve_dots, preserve_model_id=preserve_model_id)
     effective_max_tokens = max_tokens or _get_anthropic_max_output(model)
 
     # Clamp to context window if the user set a lower context_length
