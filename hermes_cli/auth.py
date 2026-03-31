@@ -220,6 +220,14 @@ PROVIDER_REGISTRY: Dict[str, ProviderConfig] = {
         api_key_env_vars=("HF_TOKEN",),
         base_url_env_var="HF_BASE_URL",
     ),
+    "bedrock": ProviderConfig(
+        id="bedrock",
+        name="AWS Bedrock",
+        auth_type="aws_credentials",
+        inference_base_url="",
+        api_key_env_vars=(),  # Not an API-key provider; uses AWS SigV4 via AnthropicBedrock
+        base_url_env_var="",
+    ),
 }
 
 
@@ -739,6 +747,7 @@ def resolve_provider(
         "hf": "huggingface", "hugging-face": "huggingface", "huggingface-hub": "huggingface",
         "go": "opencode-go", "opencode-go-sub": "opencode-go",
         "kilo": "kilocode", "kilo-code": "kilocode", "kilo-gateway": "kilocode",
+        "aws": "bedrock", "aws-bedrock": "bedrock", "amazon-bedrock": "bedrock",
         # Local server aliases — route through the generic custom provider
         "lmstudio": "custom", "lm-studio": "custom", "lm_studio": "custom",
         "ollama": "custom", "vllm": "custom", "llamacpp": "custom",
@@ -788,6 +797,11 @@ def resolve_provider(
         for env_var in pconfig.api_key_env_vars:
             if has_usable_secret(os.getenv(env_var, "")):
                 return pid
+
+    # Auto-detect AWS Bedrock credentials
+    if (has_usable_secret(os.getenv("AWS_ACCESS_KEY_ID", ""))
+            and has_usable_secret(os.getenv("AWS_SECRET_ACCESS_KEY", ""))):
+        return "bedrock"
 
     raise AuthError(
         "No inference provider configured. Run 'hermes model' to choose a "
@@ -1848,6 +1862,46 @@ def get_external_process_provider_status(provider_id: str) -> Dict[str, Any]:
     }
 
 
+def resolve_bedrock_credentials() -> Dict[str, Any]:
+    """Resolve AWS credentials for Bedrock provider."""
+    access_key = os.getenv("AWS_ACCESS_KEY_ID", "").strip()
+    secret_key = os.getenv("AWS_SECRET_ACCESS_KEY", "").strip()
+    session_token = os.getenv("AWS_SESSION_TOKEN", "").strip()
+    region = (
+        os.getenv("AWS_REGION", "").strip()
+        or os.getenv("AWS_DEFAULT_REGION", "").strip()
+        or "us-east-1"
+    )
+    return {
+        "provider": "bedrock",
+        "aws_access_key": access_key,
+        "aws_secret_key": secret_key,
+        "aws_session_token": session_token,
+        "aws_region": region,
+        "source": "env" if (access_key and secret_key) else "aws_default_chain",
+    }
+
+
+def get_bedrock_auth_status() -> Dict[str, Any]:
+    """Status snapshot for AWS Bedrock provider."""
+    access_key = os.getenv("AWS_ACCESS_KEY_ID", "").strip()
+    secret_key = os.getenv("AWS_SECRET_ACCESS_KEY", "").strip()
+    region = (
+        os.getenv("AWS_REGION", "").strip()
+        or os.getenv("AWS_DEFAULT_REGION", "").strip()
+        or "us-east-1"
+    )
+    configured = bool(access_key and secret_key)
+    return {
+        "configured": configured,
+        "logged_in": configured,
+        "provider": "bedrock",
+        "name": "AWS Bedrock",
+        "key_source": "AWS_ACCESS_KEY_ID" if configured else "",
+        "aws_region": region,
+    }
+
+
 def get_auth_status(provider_id: Optional[str] = None) -> Dict[str, Any]:
     """Generic auth status dispatcher."""
     target = provider_id or get_active_provider()
@@ -1855,6 +1909,8 @@ def get_auth_status(provider_id: Optional[str] = None) -> Dict[str, Any]:
         return get_nous_auth_status()
     if target == "openai-codex":
         return get_codex_auth_status()
+    if target == "bedrock":
+        return get_bedrock_auth_status()
     if target == "copilot-acp":
         return get_external_process_provider_status(target)
     # API-key providers

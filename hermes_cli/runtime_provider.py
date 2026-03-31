@@ -444,6 +444,22 @@ def _resolve_explicit_runtime(
             "requested_provider": requested_provider,
         }
 
+    if provider == "bedrock":
+        from hermes_cli.auth import resolve_bedrock_credentials
+        creds = resolve_bedrock_credentials()
+        return {
+            "provider": "bedrock",
+            "api_mode": "anthropic_messages",
+            "base_url": "",
+            "api_key": "",
+            "aws_access_key": creds.get("aws_access_key", ""),
+            "aws_secret_key": creds.get("aws_secret_key", ""),
+            "aws_session_token": creds.get("aws_session_token", ""),
+            "aws_region": creds.get("aws_region", "us-east-1"),
+            "source": creds.get("source", "env"),
+            "requested_provider": requested_provider,
+        }
+
     if provider == "nous":
         state = auth_mod.get_provider_auth_state("nous") or {}
         base_url = (
@@ -652,6 +668,23 @@ def resolve_runtime_provider(
             "base_url": base_url,
             "api_key": token,
             "source": "env",
+            "requested_provider": requested_provider,
+        }
+
+    # AWS Bedrock (native Anthropic Messages API via AnthropicBedrock client)
+    if provider == "bedrock":
+        from hermes_cli.auth import resolve_bedrock_credentials
+        creds = resolve_bedrock_credentials()
+        return {
+            "provider": "bedrock",
+            "api_mode": "anthropic_messages",
+            "base_url": "",
+            "api_key": "",
+            "aws_access_key": creds.get("aws_access_key", ""),
+            "aws_secret_key": creds.get("aws_secret_key", ""),
+            "aws_session_token": creds.get("aws_session_token", ""),
+            "aws_region": creds.get("aws_region", "us-east-1"),
+            "source": creds.get("source", "env"),
             "requested_provider": requested_provider,
         }
 

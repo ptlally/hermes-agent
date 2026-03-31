@@ -248,6 +248,35 @@ def build_anthropic_client(api_key: str, base_url: str = None):
     return _anthropic_sdk.Anthropic(**kwargs)
 
 
+def build_anthropic_bedrock_client(
+    aws_access_key: str = "",
+    aws_secret_key: str = "",
+    aws_session_token: str = "",
+    aws_region: str = "us-east-1",
+):
+    """Create an AnthropicBedrock client for AWS Bedrock inference."""
+    try:
+        from anthropic import AnthropicBedrock
+    except ImportError:
+        raise ImportError(
+            "The 'anthropic[bedrock]' extra is required for AWS Bedrock support. "
+            "Install it with: pip install 'anthropic[bedrock]'"
+        )
+    from httpx import Timeout
+    kwargs: dict = {
+        "aws_region": aws_region or "us-east-1",
+        "timeout": Timeout(timeout=900.0, connect=10.0),
+    }
+    if aws_access_key and aws_secret_key:
+        kwargs["aws_access_key"] = aws_access_key
+        kwargs["aws_secret_key"] = aws_secret_key
+    if aws_session_token:
+        kwargs["aws_session_token"] = aws_session_token
+    if _COMMON_BETAS:
+        kwargs["default_headers"] = {"anthropic-beta": ",".join(_COMMON_BETAS)}
+    return AnthropicBedrock(**kwargs)
+
+
 def read_claude_code_credentials() -> Optional[Dict[str, Any]]:
     """Read refreshable Claude Code OAuth credentials from ~/.claude/.credentials.json.
 
@@ -794,14 +823,18 @@ def refresh_hermes_oauth_token() -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 
-def normalize_model_name(model: str, preserve_dots: bool = False) -> str:
+def normalize_model_name(model: str, preserve_dots: bool = False, is_bedrock: bool = False) -> str:
     """Normalize a model name for the Anthropic API.
 
+    - When is_bedrock is True, returns the model name unchanged (Bedrock
+      uses its own model ID format like us.anthropic.claude-opus-4-6-v1).
     - Strips 'anthropic/' prefix (OpenRouter format, case-insensitive)
     - Converts dots to hyphens in version numbers (OpenRouter uses dots,
       Anthropic uses hyphens: claude-opus-4.6 → claude-opus-4-6), unless
       preserve_dots is True (e.g. for Alibaba/DashScope: qwen3.5-plus).
     """
+    if is_bedrock:
+        return model
     lower = model.lower()
     if lower.startswith("anthropic/"):
         model = model[len("anthropic/"):]
@@ -1154,6 +1187,7 @@ def build_anthropic_kwargs(
     tool_choice: Optional[str] = None,
     is_oauth: bool = False,
     preserve_dots: bool = False,
+    is_bedrock: bool = False,
     context_length: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Build kwargs for anthropic.messages.create().
@@ -1168,11 +1202,14 @@ def build_anthropic_kwargs(
 
     When *preserve_dots* is True, model name dots are not converted to hyphens
     (for Alibaba/DashScope anthropic-compatible endpoints: qwen3.5-plus).
+
+    When *is_bedrock* is True, the model name is passed through unchanged
+    (Bedrock uses its own model ID format).
     """
     system, anthropic_messages = convert_messages_to_anthropic(messages)
     anthropic_tools = convert_tools_to_anthropic(tools) if tools else []
 
-    model = normalize_model_name(model, preserve_dots=preserve_dots)
+    model = normalize_model_name(model, preserve_dots=preserve_dots, is_bedrock=is_bedrock)
     effective_max_tokens = max_tokens or _get_anthropic_max_output(model)
 
     # Clamp to context window if the user set a lower context_length
