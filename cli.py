@@ -2030,6 +2030,10 @@ class HermesCLI:
                 "api_mode": self.api_mode,
                 "command": self.acp_command,
                 "args": list(self.acp_args or []),
+                "aws_access_key": getattr(self, "_aws_access_key", ""),
+                "aws_secret_key": getattr(self, "_aws_secret_key", ""),
+                "aws_session_token": getattr(self, "_aws_session_token", ""),
+                "aws_region": getattr(self, "_aws_region", ""),
             },
         )
 

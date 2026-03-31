@@ -5263,6 +5263,7 @@ class AIAgent:
                     tools=[memory_tool_def], max_tokens=5120,
                     reasoning_config=None,
                     preserve_dots=self._anthropic_preserve_dots(),
+                    is_bedrock=(self.provider == "bedrock"),
                 )
                 response = self._anthropic_messages_create(ant_kwargs)
             elif not _aux_available:
@@ -6092,7 +6093,8 @@ class AIAgent:
                     _ant_kw = _bak(model=self.model, messages=api_messages, tools=None,
                                    max_tokens=self.max_tokens, reasoning_config=self.reasoning_config,
                                    is_oauth=self._is_anthropic_oauth,
-                                   preserve_dots=self._anthropic_preserve_dots())
+                                   preserve_dots=self._anthropic_preserve_dots(),
+                                   is_bedrock=(self.provider == "bedrock"))
                     summary_response = self._anthropic_messages_create(_ant_kw)
                     _msg, _ = _nar(summary_response, strip_tool_prefix=self._is_anthropic_oauth)
                     final_response = (_msg.content or "").strip()
@@ -6124,7 +6126,8 @@ class AIAgent:
                     _ant_kw2 = _bak2(model=self.model, messages=api_messages, tools=None,
                                     is_oauth=self._is_anthropic_oauth,
                                     max_tokens=self.max_tokens, reasoning_config=self.reasoning_config,
-                                    preserve_dots=self._anthropic_preserve_dots())
+                                    preserve_dots=self._anthropic_preserve_dots(),
+                                    is_bedrock=(self.provider == "bedrock"))
                     retry_response = self._anthropic_messages_create(_ant_kw2)
                     _retry_msg, _ = _nar2(retry_response, strip_tool_prefix=self._is_anthropic_oauth)
                     final_response = (_retry_msg.content or "").strip()

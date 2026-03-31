@@ -272,9 +272,16 @@ def build_anthropic_bedrock_client(
         kwargs["aws_secret_key"] = aws_secret_key
     if aws_session_token:
         kwargs["aws_session_token"] = aws_session_token
-    if _COMMON_BETAS:
-        kwargs["default_headers"] = {"anthropic-beta": ",".join(_COMMON_BETAS)}
-    return AnthropicBedrock(**kwargs)
+    # Do not forward _COMMON_BETAS to Bedrock — Bedrock proxies Anthropic's
+    # API on its own release cadence and may reject unknown beta headers.
+    try:
+        return AnthropicBedrock(**kwargs)
+    except Exception as exc:
+        raise RuntimeError(
+            f"Failed to initialize AWS Bedrock client: {exc}\n"
+            "Check that boto3 is installed ('pip install anthropic[bedrock]') "
+            "and that your AWS credentials and region are valid."
+        ) from exc
 
 
 def read_claude_code_credentials() -> Optional[Dict[str, Any]]:

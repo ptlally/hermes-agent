@@ -191,6 +191,10 @@ def resolve_turn_route(user_message: str, routing_config: Optional[Dict[str, Any
             "api_mode": runtime.get("api_mode"),
             "command": runtime.get("command"),
             "args": list(runtime.get("args") or []),
+            "aws_access_key": runtime.get("aws_access_key", ""),
+            "aws_secret_key": runtime.get("aws_secret_key", ""),
+            "aws_session_token": runtime.get("aws_session_token", ""),
+            "aws_region": runtime.get("aws_region", ""),
         },
         "label": f"smart route → {route.get('model')} ({runtime.get('provider')})",
         "signature": (
