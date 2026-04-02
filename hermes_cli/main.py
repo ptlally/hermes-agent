@@ -192,6 +192,16 @@ def _has_any_provider_configured() -> bool:
         _model_name = ""
     _has_hermes_config = _model_name and _model_name != _DEFAULT_MODEL
 
+    # Bedrock with IAM role auth: if the user has explicitly configured
+    # provider=bedrock in config, credentials come from the instance metadata
+    # service (no env vars needed). Trust the config.
+    if _has_hermes_config:
+        _provider = ""
+        if isinstance(model_cfg, dict):
+            _provider = (model_cfg.get("provider") or "").strip().lower()
+        if _provider in ("bedrock", "aws-bedrock", "aws"):
+            return True
+
     # Check env vars (may be set by .env or shell).
     # OPENAI_BASE_URL alone counts — local models (vLLM, llama.cpp, etc.)
     # often don't require an API key.
@@ -2354,6 +2364,7 @@ def _model_flow_bedrock(config, current_model=""):
         get_env_value("AWS_SECRET_ACCESS_KEY")
         or os.getenv("AWS_SECRET_ACCESS_KEY", "")
     ).strip()
+    existing_profile = os.getenv("AWS_PROFILE", "").strip()
     has_creds = has_usable_secret(existing_access_key) and has_usable_secret(existing_secret_key)
 
     if has_creds:
@@ -2376,36 +2387,75 @@ def _model_flow_bedrock(config, current_model=""):
     if not has_creds:
         print()
         print("  Configure AWS credentials for Bedrock.")
-        print("  Get access keys at: https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html")
+        print()
+        print("    1. Enter AWS Access Key ID / Secret Key")
+        print("    2. Use AWS Profile (from ~/.aws/credentials)")
+        print("    3. Use IAM instance role (EC2/ECS — no keys needed)")
+        print("    4. Cancel")
         print()
         try:
-            access_key = input("  AWS Access Key ID: ").strip()
+            auth_choice = input("  Choice [1/2/3/4]: ").strip()
         except (KeyboardInterrupt, EOFError):
             print()
             return
-        if not access_key:
-            print("  Cancelled.")
-            return
-        try:
-            import getpass
-            secret_key = getpass.getpass("  AWS Secret Access Key: ").strip()
-        except (KeyboardInterrupt, EOFError):
+
+        if auth_choice == "1":
+            # Explicit access keys
             print()
+            print("  Get access keys at: https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html")
+            print()
+            try:
+                access_key = input("  AWS Access Key ID: ").strip()
+            except (KeyboardInterrupt, EOFError):
+                print()
+                return
+            if not access_key:
+                print("  Cancelled.")
+                return
+            try:
+                import getpass
+                secret_key = getpass.getpass("  AWS Secret Access Key: ").strip()
+            except (KeyboardInterrupt, EOFError):
+                print()
+                return
+            if not secret_key:
+                print("  Cancelled.")
+                return
+
+            save_env_value("AWS_ACCESS_KEY_ID", access_key)
+            save_env_value("AWS_SECRET_ACCESS_KEY", secret_key)
+
+            try:
+                session_token = input("  AWS Session Token (optional, press Enter to skip): ").strip()
+            except (KeyboardInterrupt, EOFError):
+                session_token = ""
+            if session_token:
+                save_env_value("AWS_SESSION_TOKEN", session_token)
+            print("  ✓ AWS credentials saved.")
+
+        elif auth_choice == "2":
+            # AWS Profile
+            default_profile = existing_profile or "default"
+            try:
+                profile = input(f"  AWS Profile name [{default_profile}]: ").strip()
+            except (KeyboardInterrupt, EOFError):
+                profile = ""
+            profile = profile or default_profile
+            save_env_value("AWS_PROFILE", profile)
+            print(f"  ✓ AWS Profile set to: {profile}")
+
+        elif auth_choice == "3":
+            # IAM instance role — nothing to configure
+            print("  ✓ Will use IAM instance role for authentication.")
+            print("    Make sure the instance has bedrock:InvokeModel permissions.")
+
+        elif auth_choice == "4":
             return
-        if not secret_key:
-            print("  Cancelled.")
+        else:
+            print("  Invalid choice.")
             return
 
-        save_env_value("AWS_ACCESS_KEY_ID", access_key)
-        save_env_value("AWS_SECRET_ACCESS_KEY", secret_key)
-
-        try:
-            session_token = input("  AWS Session Token (optional, press Enter to skip): ").strip()
-        except (KeyboardInterrupt, EOFError):
-            session_token = ""
-        if session_token:
-            save_env_value("AWS_SESSION_TOKEN", session_token)
-
+        # Region selection (for all auth methods)
         existing_region = (
             get_env_value("AWS_REGION")
             or os.getenv("AWS_REGION", "")
@@ -2435,7 +2485,7 @@ def _model_flow_bedrock(config, current_model=""):
             model = {"default": model} if model else {}
             cfg["model"] = model
         model["provider"] = "bedrock"
-        model["api_mode"] = "anthropic_messages"
+        model["api_mode"] = "bedrock_converse"
         model.pop("base_url", None)
         save_config(cfg)
         deactivate_provider()
