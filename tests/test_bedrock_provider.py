@@ -257,9 +257,9 @@ class TestBedrockRuntimeProvider:
         from hermes_cli.runtime_provider import resolve_runtime_provider
         result = resolve_runtime_provider(requested="bedrock")
         assert result["provider"] == "bedrock"
-        assert result["api_mode"] == "anthropic_messages"
+        assert result["api_mode"] == "bedrock_converse"
         assert result["uses_platform_auth"] is True
-        assert result["api_key"] == ""
+        assert result["api_key"] == "bedrock-sigv4-auth"
         assert result["base_url"] == ""
         assert result["requested_provider"] == "bedrock"
 
