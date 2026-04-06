@@ -6918,6 +6918,10 @@ class AIAgent:
                                 if getattr(_blk, "type", None) == "text":
                                     _text_parts.append(getattr(_blk, "text", ""))
                             _trunc_content = "\n".join(_text_parts) if _text_parts else None
+                        elif self.api_mode == "bedrock_converse":
+                            # Bedrock response is a tuple (assistant_message, finish_reason)
+                            # assistant_message is a SimpleNamespace with .content as string
+                            _trunc_content = getattr(response[0], "content", None) if response else None
 
                         _thinking_exhausted = (
                             _trunc_content is not None
