@@ -22,16 +22,22 @@ from urllib.parse import quote as url_quote
 # ---------------------------------------------------------------------------
 
 BEDROCK_MODEL_METADATA: Dict[str, Dict[str, int]] = {
-    # Anthropic Claude models
+    # Anthropic Claude 3 models (base - no prefix)
     "anthropic.claude-3-5-sonnet-20241022-v2:0": {"context_length": 200000, "max_output_tokens": 8192},
     "anthropic.claude-3-5-haiku-20241022-v1:0": {"context_length": 200000, "max_output_tokens": 8192},
     "anthropic.claude-3-opus-20240229-v1:0": {"context_length": 200000, "max_output_tokens": 4096},
     "anthropic.claude-3-sonnet-20240229-v1:0": {"context_length": 200000, "max_output_tokens": 4096},
     "anthropic.claude-3-haiku-20240307-v1:0": {"context_length": 200000, "max_output_tokens": 4096},
-    # Claude 4 / Sonnet 4 / Opus 4 (cross-region)
+    # Claude 4 / Sonnet 4 / Opus 4 - base (no prefix) for fallback
+    "anthropic.claude-sonnet-4-20250514-v1:0": {"context_length": 200000, "max_output_tokens": 16384},
+    "anthropic.claude-opus-4-20250514-v1:0": {"context_length": 200000, "max_output_tokens": 16384},
+    # Claude 4 / Sonnet 4 / Opus 4 (cross-region: us, eu)
     "us.anthropic.claude-sonnet-4-20250514-v1:0": {"context_length": 200000, "max_output_tokens": 16384},
     "us.anthropic.claude-opus-4-20250514-v1:0": {"context_length": 200000, "max_output_tokens": 16384},
     "eu.anthropic.claude-sonnet-4-20250514-v1:0": {"context_length": 200000, "max_output_tokens": 16384},
+    # Claude 4 / Sonnet 4 / Opus 4 (global)
+    "global.anthropic.claude-opus-4-6-v1:0": {"context_length": 200000, "max_output_tokens": 16384},
+    "global.anthropic.claude-sonnet-4-6-v1:0": {"context_length": 200000, "max_output_tokens": 16384},
     # Amazon Nova models
     "amazon.nova-pro-v1:0": {"context_length": 300000, "max_output_tokens": 5120},
     "amazon.nova-lite-v1:0": {"context_length": 300000, "max_output_tokens": 5120},
@@ -61,6 +67,41 @@ BEDROCK_MODEL_ALIASES: Dict[str, str] = {
     "llama3.1-70b": "meta.llama3-1-70b-instruct-v1:0",
     "mistral-large": "mistral.mistral-large-2407-v1:0",
 }
+
+
+# ---------------------------------------------------------------------------
+# Prefix normalization helper
+# ---------------------------------------------------------------------------
+
+# Known region prefixes that can be stripped for metadata lookup
+# See: https://docs.aws.amazon.com/bedrock/latest/userguide/geographic-cross-region-inference.html
+# and https://docs.aws.amazon.com/cdk/api/v2/docs/@aws-cdk_aws-bedrock-alpha.CrossRegionInferenceProfileRegion.html
+BEDROCK_REGION_PREFIXES: frozenset = frozenset({"us", "eu", "apac", "global", "us-gov", "jp", "au"})
+
+
+def _strip_region_prefix(model_id: str) -> str:
+    """Strip known region prefixes from a Bedrock model ID.
+
+    Known prefixes: us., eu., apac., global., us-gov., jp., au.
+
+    Examples::
+
+        _strip_region_prefix("us.anthropic.claude-sonnet-4-20250514-v1:0")
+        # → "anthropic.claude-sonnet-4-20250514-v1:0"
+
+        _strip_region_prefix("global.anthropic.claude-opus-4-6-v1:0")
+        # → "anthropic.claude-opus-4-6-v1:0"
+
+        _strip_region_prefix("apac.anthropic.claude-sonnet-4-20250514-v1:0")
+        # → "anthropic.claude-sonnet-4-20250514-v1:0"
+
+        _strip_region_prefix("anthropic.claude-3-5-sonnet-20241022-v2:0")
+        # → "anthropic.claude-3-5-sonnet-20241022-v2:0" (no change)
+    """
+    parts = model_id.split(".", 1)
+    if len(parts) == 2 and parts[0] in BEDROCK_REGION_PREFIXES:
+        return parts[1]
+    return model_id
 
 
 # ---------------------------------------------------------------------------
@@ -100,8 +141,8 @@ def get_bedrock_context_length(model: str) -> int:
     """Return context length for a Bedrock model from the static metadata table.
 
     Resolves the model ID via :func:`get_bedrock_model_id`, then looks up
-    the metadata. For cross-region models (e.g. ``us.anthropic.…``), tries
-    both the full ID and the ID without the region prefix.
+    the metadata. For cross-region models (e.g. ``us.anthropic.…``, ``global.anthropic.…``),
+    tries both the full ID and the ID without the region prefix.
 
     Raises:
         KeyError: If the model is not found in BEDROCK_MODEL_METADATA.
@@ -112,12 +153,10 @@ def get_bedrock_context_length(model: str) -> int:
     if model_id in BEDROCK_MODEL_METADATA:
         return BEDROCK_MODEL_METADATA[model_id]["context_length"]
 
-    # Try without cross-region prefix (e.g. strip "us." or "eu.")
-    parts = model_id.split(".", 1)
-    if len(parts) == 2 and len(parts[0]) <= 3:
-        base_id = parts[1]
-        if base_id in BEDROCK_MODEL_METADATA:
-            return BEDROCK_MODEL_METADATA[base_id]["context_length"]
+    # Try without known region prefix (us., eu., global.)
+    base_id = _strip_region_prefix(model_id)
+    if base_id != model_id and base_id in BEDROCK_MODEL_METADATA:
+        return BEDROCK_MODEL_METADATA[base_id]["context_length"]
 
     raise KeyError(
         f"Unknown Bedrock model: {model_id!r}. "
@@ -129,8 +168,8 @@ def get_bedrock_max_output_tokens(model: str) -> int:
     """Return max output tokens for a Bedrock model.
 
     Resolves the model ID via :func:`get_bedrock_model_id`, then looks up
-    the metadata. For cross-region models, tries both with and without the
-    region prefix. Falls back to 8192 if the model is not found.
+    the metadata. For cross-region models (e.g. ``us.anthropic.…``, ``global.anthropic.…``),
+    tries both with and without the region prefix. Falls back to 8192 if the model is not found.
     """
     model_id = get_bedrock_model_id(model)
 
@@ -138,12 +177,10 @@ def get_bedrock_max_output_tokens(model: str) -> int:
     if model_id in BEDROCK_MODEL_METADATA:
         return BEDROCK_MODEL_METADATA[model_id]["max_output_tokens"]
 
-    # Try without cross-region prefix
-    parts = model_id.split(".", 1)
-    if len(parts) == 2 and len(parts[0]) <= 3:
-        base_id = parts[1]
-        if base_id in BEDROCK_MODEL_METADATA:
-            return BEDROCK_MODEL_METADATA[base_id]["max_output_tokens"]
+    # Try without known region prefix (us., eu., global.)
+    base_id = _strip_region_prefix(model_id)
+    if base_id != model_id and base_id in BEDROCK_MODEL_METADATA:
+        return BEDROCK_MODEL_METADATA[base_id]["max_output_tokens"]
 
     return 8192
 

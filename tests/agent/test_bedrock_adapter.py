@@ -16,6 +16,7 @@ from agent.bedrock_adapter import (
     _convert_tools_to_bedrock,
     _is_cache_supported_model,
     _map_stop_reason,
+    _strip_region_prefix,
     _strip_unsupported_schema_fields,
     build_bedrock_kwargs,
     get_bedrock_context_length,
@@ -137,6 +138,87 @@ class TestContextLengthMetadataProperty:
         result = get_bedrock_context_length(model_id)
         expected = BEDROCK_MODEL_METADATA[model_id]["context_length"]
         assert result == expected
+
+
+# ---------------------------------------------------------------------------
+# Property: Global prefix handling for model metadata
+# Feature: aws-bedrock-provider, Task 12: Fix prefix handling for global.* models
+# Validates: Prefix handling fix
+# ---------------------------------------------------------------------------
+
+
+class TestGlobalPrefixHandlingProperty:
+    """Prefix stripping works for global., us., eu. prefixes."""
+
+    # Test data: (prefixed_model, expected_base_model)
+    _prefix_test_cases = [
+        # global.* models
+        ("global.anthropic.claude-opus-4-6-v1:0", "anthropic.claude-opus-4-6-v1:0"),
+        ("global.anthropic.claude-sonnet-4-6-v1:0", "anthropic.claude-sonnet-4-6-v1:0"),
+        # us.* models
+        ("us.anthropic.claude-sonnet-4-20250514-v1:0", "anthropic.claude-sonnet-4-20250514-v1:0"),
+        ("us.anthropic.claude-opus-4-20250514-v1:0", "anthropic.claude-opus-4-20250514-v1:0"),
+        # eu.* models
+        ("eu.anthropic.claude-sonnet-4-20250514-v1:0", "anthropic.claude-sonnet-4-20250514-v1:0"),
+        # apac.* models
+        ("apac.anthropic.claude-sonnet-4-20250514-v1:0", "anthropic.claude-sonnet-4-20250514-v1:0"),
+        # jp.* models
+        ("jp.anthropic.claude-sonnet-4-20250514-v1:0", "anthropic.claude-sonnet-4-20250514-v1:0"),
+        # au.* models
+        ("au.anthropic.claude-sonnet-4-20250514-v1:0", "anthropic.claude-sonnet-4-20250514-v1:0"),
+        # us-gov.* models
+        ("us-gov.anthropic.claude-sonnet-4-20250514-v1:0", "anthropic.claude-sonnet-4-20250514-v1:0"),
+    ]
+
+    @given(prefixed_model=st.sampled_from([tc[0] for tc in _prefix_test_cases]))
+    @settings(max_examples=100)
+    def test_global_prefix_max_tokens_lookup(self, prefixed_model: str) -> None:
+        """global.anthropic.* models resolve to correct max_output_tokens via prefix stripping."""
+        result = get_bedrock_max_output_tokens(prefixed_model)
+        # Should not fall back to 8192 - should find the base model in metadata
+        assert result != 8192, f"Expected non-fallback value for {prefixed_model}, got {result}"
+
+    @given(prefixed_model=st.sampled_from([tc[0] for tc in _prefix_test_cases]))
+    @settings(max_examples=100)
+    def test_global_prefix_context_length_lookup(self, prefixed_model: str) -> None:
+        """global.anthropic.* models resolve to correct context_length via prefix stripping."""
+        result = get_bedrock_context_length(prefixed_model)
+        # Should return a positive value
+        assert result > 0, f"Expected positive context length for {prefixed_model}, got {result}"
+
+    def test_exact_global_model_with_bedrock_prefix(self) -> None:
+        """bedrock/global.anthropic.claude-opus-4-6-v1 resolves correctly."""
+        result = get_bedrock_max_output_tokens("bedrock/global.anthropic.claude-opus-4-6-v1:0")
+        assert result == 16384
+
+    def test_exact_global_model_direct(self) -> None:
+        """global.anthropic.claude-opus-4-6-v1:0 resolves correctly."""
+        result = get_bedrock_max_output_tokens("global.anthropic.claude-opus-4-6-v1:0")
+        assert result == 16384
+
+    def test_us_prefix_resolves_correctly(self) -> None:
+        """us.anthropic.* models resolve correctly."""
+        result = get_bedrock_max_output_tokens("us.anthropic.claude-sonnet-4-20250514-v1:0")
+        assert result == 16384
+
+    def test_eu_prefix_resolves_correctly(self) -> None:
+        """eu.anthropic.* models resolve correctly."""
+        result = get_bedrock_max_output_tokens("eu.anthropic.claude-sonnet-4-20250514-v1:0")
+        assert result == 16384
+
+    def test_strip_region_prefix_function(self) -> None:
+        """_strip_region_prefix correctly strips known prefixes."""
+        assert _strip_region_prefix("global.anthropic.claude-opus-4-6-v1:0") == "anthropic.claude-opus-4-6-v1:0"
+        assert _strip_region_prefix("us.anthropic.claude-sonnet-4-20250514-v1:0") == "anthropic.claude-sonnet-4-20250514-v1:0"
+        assert _strip_region_prefix("eu.anthropic.claude-sonnet-4-20250514-v1:0") == "anthropic.claude-sonnet-4-20250514-v1:0"
+        assert _strip_region_prefix("apac.anthropic.claude-sonnet-4-20250514-v1:0") == "anthropic.claude-sonnet-4-20250514-v1:0"
+        assert _strip_region_prefix("jp.anthropic.claude-sonnet-4-20250514-v1:0") == "anthropic.claude-sonnet-4-20250514-v1:0"
+        assert _strip_region_prefix("au.anthropic.claude-sonnet-4-20250514-v1:0") == "anthropic.claude-sonnet-4-20250514-v1:0"
+        assert _strip_region_prefix("us-gov.anthropic.claude-sonnet-4-20250514-v1:0") == "anthropic.claude-sonnet-4-20250514-v1:0"
+        # No prefix - should return unchanged
+        assert _strip_region_prefix("anthropic.claude-3-5-sonnet-20241022-v2:0") == "anthropic.claude-3-5-sonnet-20241022-v2:0"
+        # Unknown prefix - should return unchanged
+        assert _strip_region_prefix("unknown.model.name") == "unknown.model.name"
 
 
 # ---------------------------------------------------------------------------
