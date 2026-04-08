@@ -952,7 +952,7 @@ def select_provider_and_model():
         ("copilot-acp", "GitHub Copilot ACP (spawns `copilot --acp --stdio`)"),
         ("copilot", "GitHub Copilot (uses GITHUB_TOKEN or gh auth token)"),
         ("anthropic", "Anthropic (Claude models — API key or Claude Code)"),
-        ("bedrock", "AWS Bedrock (Claude models via AWS credentials)"),
+        ("bedrock", "AWS Bedrock (Bedrock models via AWS credentials)"),
         ("zai", "Z.AI / GLM (Zhipu AI direct API)"),
         ("kimi-coding", "Kimi / Moonshot (Moonshot AI direct API)"),
         ("minimax", "MiniMax (global direct API)"),
