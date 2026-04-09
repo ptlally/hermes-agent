@@ -22,32 +22,39 @@ from urllib.parse import quote as url_quote
 # ---------------------------------------------------------------------------
 
 BEDROCK_MODEL_METADATA: Dict[str, Dict[str, int]] = {
-    # Anthropic Claude 3 models (base - no prefix)
-    "anthropic.claude-3-5-sonnet-20241022-v2:0": {"context_length": 200000, "max_output_tokens": 8192},
-    "anthropic.claude-3-5-haiku-20241022-v1:0": {"context_length": 200000, "max_output_tokens": 8192},
-    "anthropic.claude-3-opus-20240229-v1:0": {"context_length": 200000, "max_output_tokens": 4096},
-    "anthropic.claude-3-sonnet-20240229-v1:0": {"context_length": 200000, "max_output_tokens": 4096},
-    "anthropic.claude-3-haiku-20240307-v1:0": {"context_length": 200000, "max_output_tokens": 4096},
-    # Claude 4 / Sonnet 4 / Opus 4 - base (no prefix) for fallback
+    # Claude 4 / Sonnet 4 / Opus 4
     "anthropic.claude-sonnet-4-20250514-v1:0": {"context_length": 200000, "max_output_tokens": 16384},
+    "anthropic.claude-sonnet-4": {"context_length": 200000, "max_output_tokens": 16384},
     "anthropic.claude-opus-4-20250514-v1:0": {"context_length": 200000, "max_output_tokens": 16384},
-    # Claude 4 / Sonnet 4 / Opus 4 (cross-region: us, eu)
-    "us.anthropic.claude-sonnet-4-20250514-v1:0": {"context_length": 200000, "max_output_tokens": 16384},
-    "us.anthropic.claude-opus-4-20250514-v1:0": {"context_length": 200000, "max_output_tokens": 16384},
-    "eu.anthropic.claude-sonnet-4-20250514-v1:0": {"context_length": 200000, "max_output_tokens": 16384},
-    # Claude 4 / Sonnet 4 / Opus 4 (global)
-    "global.anthropic.claude-opus-4-6-v1:0": {"context_length": 200000, "max_output_tokens": 16384},
-    "global.anthropic.claude-sonnet-4-6-v1:0": {"context_length": 200000, "max_output_tokens": 16384},
+    "anthropic.claude-opus-4": {"context_length": 200000, "max_output_tokens": 16384},
+    # Claude Opus 4.1
+    "anthropic.claude-opus-4-1-20250805-v1:0": {"context_length": 200000, "max_output_tokens": 16384},
+    "anthropic.claude-opus-4-1": {"context_length": 200000, "max_output_tokens": 16384},
+    # Claude Haiku 4.5 / Sonnet 4.5 / Opus 4.5
+    "anthropic.claude-haiku-4-5-20251001-v1:0": {"context_length": 200000, "max_output_tokens": 16384},
+    "anthropic.claude-haiku-4-5": {"context_length": 200000, "max_output_tokens": 16384},
+    "anthropic.claude-sonnet-4-5-20250929-v1:0": {"context_length": 200000, "max_output_tokens": 16384},
+    "anthropic.claude-sonnet-4-5": {"context_length": 200000, "max_output_tokens": 16384},
+    "anthropic.claude-opus-4-5-20251101-v1:0": {"context_length": 200000, "max_output_tokens": 16384},
+    "anthropic.claude-opus-4-5": {"context_length": 200000, "max_output_tokens": 16384},
+    # Claude 4.6 / Sonnet 4.6 / Opus 4.6
+    "anthropic.claude-sonnet-4-6-v1:0": {"context_length": 1000000, "max_output_tokens": 16384},
+    "anthropic.claude-sonnet-4-6": {"context_length": 1000000, "max_output_tokens": 16384},
+    "anthropic.claude-opus-4-6-v1:0": {"context_length": 1000000, "max_output_tokens": 16384},
+    "anthropic.claude-opus-4-6": {"context_length": 1000000, "max_output_tokens": 16384},
     # Amazon Nova models
     "amazon.nova-pro-v1:0": {"context_length": 300000, "max_output_tokens": 5120},
     "amazon.nova-lite-v1:0": {"context_length": 300000, "max_output_tokens": 5120},
     "amazon.nova-micro-v1:0": {"context_length": 128000, "max_output_tokens": 5120},
     # Meta Llama models
-    "meta.llama3-1-405b-instruct-v1:0": {"context_length": 128000, "max_output_tokens": 4096},
-    "meta.llama3-1-70b-instruct-v1:0": {"context_length": 128000, "max_output_tokens": 4096},
-    "meta.llama3-1-8b-instruct-v1:0": {"context_length": 128000, "max_output_tokens": 4096},
-    # Mistral models
-    "mistral.mistral-large-2407-v1:0": {"context_length": 128000, "max_output_tokens": 8192},
+    # "meta.llama3-1-405b-instruct-v1:0": {"context_length": 128000, "max_output_tokens": 4096},
+    "meta.llama3-3-70b-instruct-v1:0": {"context_length": 128000, "max_output_tokens": 8192},
+    "meta.llama3-3-70b-instruct": {"context_length": 128000, "max_output_tokens": 8192},
+    # Writer models
+    "writer.palmyra-x4-v1:0": {"context_length": 128000, "max_output_tokens": 8192},
+    "writer.palmyra-x4": {"context_length": 128000, "max_output_tokens": 8192},
+    "writer.palmyra-x5-v1:0": {"context_length": 1040000, "max_output_tokens": 8192},
+    "writer.palmyra-x5": {"context_length": 1040000, "max_output_tokens": 8192},
 }
 
 # ---------------------------------------------------------------------------
@@ -55,8 +62,13 @@ BEDROCK_MODEL_METADATA: Dict[str, Dict[str, int]] = {
 # ---------------------------------------------------------------------------
 
 BEDROCK_MODEL_ALIASES: Dict[str, str] = {
-    "claude-sonnet-4": "us.anthropic.claude-sonnet-4-20250514-v1:0",
-    "claude-opus-4": "us.anthropic.claude-opus-4-20250514-v1:0",
+    "claude-sonnet-4": "anthropic.claude-sonnet-4-20250514-v1:0",
+    "claude-opus-4": "anthropic.claude-opus-4-20250514-v1:0",
+    "claude-sonnet-4.5": "anthropic.claude-sonnet-4-5-20250514-v1:0",
+    "claude-opus-4.5": "anthropic.claude-opus-4-5-20250514-v1:0",
+    "claude-sonnet-4.6": "anthropic.claude-sonnet-4-6-v1:0",
+    "claude-opus-4.6": "anthropic.claude-opus-4-6-v1:0",
+    "claude-haiku-4.5": "anthropic.claude-haiku-4-5-20250514-v1:0",
     "claude-3.5-sonnet": "anthropic.claude-3-5-sonnet-20241022-v2:0",
     "claude-3.5-haiku": "anthropic.claude-3-5-haiku-20241022-v1:0",
     "claude-3-opus": "anthropic.claude-3-opus-20240229-v1:0",

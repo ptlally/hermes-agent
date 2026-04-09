@@ -65,16 +65,18 @@ class TestModelIdResolutionProperty:
         assert result == full_id
 
     @given(
-        full_id=st.sampled_from(
-            [k for k in sorted(BEDROCK_MODEL_METADATA.keys()) if k.startswith(("us.", "eu."))]
-        )
+        prefix=st.sampled_from(["us", "eu", "apac", "global"]),
+        base_id=st.sampled_from(
+            [k for k in sorted(BEDROCK_MODEL_METADATA.keys()) if not any(k.startswith(p + ".") for p in ("us", "eu", "apac", "global", "us-gov", "jp", "au"))]
+        ),
     )
     @settings(max_examples=100)
-    def test_cross_region_prefix_preserved(self, full_id: str) -> None:
-        """Cross-region prefixes (us., eu.) are preserved in the resolved ID."""
-        result = get_bedrock_model_id(f"bedrock/{full_id}")
-        assert result == full_id
-        assert result.startswith(("us.", "eu."))
+    def test_cross_region_prefix_preserved(self, prefix: str, base_id: str) -> None:
+        """Cross-region prefixes (us., eu., etc.) are preserved in the resolved ID."""
+        prefixed = f"{prefix}.{base_id}"
+        result = get_bedrock_model_id(f"bedrock/{prefixed}")
+        assert result == prefixed
+        assert result.startswith(f"{prefix}.")
 
 
 # ---------------------------------------------------------------------------
