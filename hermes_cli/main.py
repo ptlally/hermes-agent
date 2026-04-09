@@ -1245,6 +1245,26 @@ def _model_flow_openai_codex(config, current_model=""):
         print("No change.")
 
 
+def _parse_token_count(raw: str) -> "int | None":
+    """Parse a human-friendly token count string.
+
+    Supports: 200000, 200,000, 200k, 200K, 1m, 1M, 1.2m, 1.2M
+    Returns None if unparseable or non-positive.
+    """
+    s = raw.strip().replace(",", "").lower()
+    if not s:
+        return None
+    try:
+        if s.endswith("m"):
+            val = int(float(s[:-1]) * 1_000_000)
+        elif s.endswith("k"):
+            val = int(float(s[:-1]) * 1_000)
+        else:
+            val = int(s)
+        return val if val > 0 else None
+    except (ValueError, OverflowError):
+        return None
+
 
 def _model_flow_custom(config):
     """Custom endpoint: collect URL, API key, and model name.
@@ -1338,13 +1358,9 @@ def _model_flow_custom(config):
 
     context_length = None
     if context_length_str:
-        try:
-            context_length = int(context_length_str.replace(",", "").replace("k", "000").replace("K", "000"))
-            if context_length <= 0:
-                context_length = None
-        except ValueError:
+        context_length = _parse_token_count(context_length_str)
+        if context_length is None:
             print(f"Invalid context length: {context_length_str} — will auto-detect.")
-            context_length = None
 
     if model_name:
         _save_model_choice(model_name)
@@ -2487,6 +2503,34 @@ def _model_flow_bedrock(config, current_model=""):
         model["provider"] = "bedrock"
         model["api_mode"] = "bedrock_converse"
         model.pop("base_url", None)
+
+        # Check if the selected model has known metadata.  ARNs and custom
+        # model IDs may not be in the static table — prompt for context_length
+        # so the compressor uses the right value.  Matches the custom endpoint
+        # flow pattern (auto-detect when left blank).
+        try:
+            from agent.bedrock_adapter import has_bedrock_model_metadata, get_bedrock_model_id
+            resolved_id = get_bedrock_model_id(selected)
+            if not has_bedrock_model_metadata(selected):
+                print()
+                print(f"  ⚠  Model metadata not found for: {resolved_id}")
+                print()
+                try:
+                    ctx_input = input("  Context length in tokens [leave blank for auto-detect]: ").strip()
+                except (KeyboardInterrupt, EOFError):
+                    ctx_input = ""
+                if ctx_input:
+                    ctx_val = _parse_token_count(ctx_input)
+                    if ctx_val:
+                        model["context_length"] = ctx_val
+                        print(f"  ✓ Context length: {ctx_val:,}")
+                    else:
+                        print(f"  Invalid context length: {ctx_input} — will auto-detect.")
+                else:
+                    print("  Will auto-detect context length.")
+        except Exception:
+            pass  # Don't block setup if metadata check fails
+
         save_config(cfg)
         deactivate_provider()
         print(f"  ✓ Default model set to: {selected}")

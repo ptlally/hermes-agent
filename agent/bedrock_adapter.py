@@ -112,8 +112,13 @@ def get_bedrock_model_id(model: str) -> str:
     """Resolve a Hermes model string to a full Bedrock model ID.
 
     Strips the ``bedrock/`` prefix, resolves short aliases from
-    BEDROCK_MODEL_ALIASES, and preserves cross-region prefixes
-    (e.g. ``us.``, ``eu.``).
+    BEDROCK_MODEL_ALIASES, extracts model IDs from ARNs, and preserves
+    cross-region prefixes (e.g. ``us.``, ``eu.``).
+
+    ARN formats handled:
+    - ``arn:...:foundation-model/<model-id>`` → extracts model-id
+    - ``arn:...:inference-profile/<model-id>`` → extracts model-id
+    - ``arn:...:application-inference-profile/<opaque-id>`` → passes through as-is
 
     Examples::
 
@@ -123,12 +128,37 @@ def get_bedrock_model_id(model: str) -> str:
         get_bedrock_model_id("bedrock/us.anthropic.claude-sonnet-4-20250514-v1:0")
         # → "us.anthropic.claude-sonnet-4-20250514-v1:0"
 
-        get_bedrock_model_id("anthropic.claude-3-5-sonnet-20241022-v2:0")
+        get_bedrock_model_id("arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-5-sonnet-20241022-v2:0")
         # → "anthropic.claude-3-5-sonnet-20241022-v2:0"
+
+        get_bedrock_model_id("arn:aws:bedrock:us-east-1:123456:inference-profile/us.anthropic.claude-sonnet-4-20250514-v1:0")
+        # → "us.anthropic.claude-sonnet-4-20250514-v1:0"
+
+        get_bedrock_model_id("arn:aws:bedrock:us-east-1:123456:application-inference-profile/abc123")
+        # → "arn:aws:bedrock:us-east-1:123456:application-inference-profile/abc123" (opaque, passed through)
     """
     # Strip bedrock/ prefix if present
     if model.startswith("bedrock/"):
         model = model[len("bedrock/"):]
+
+    # Handle ARN formats
+    if model.startswith("arn:"):
+        # ARN format: arn:partition:service:region:account:resource-type/resource-id
+        # Extract the segment after the last "/"
+        slash_idx = model.rfind("/")
+        if slash_idx != -1:
+            resource_id = model[slash_idx + 1:]
+            # For foundation-model and inference-profile ARNs, the resource_id
+            # is a real model ID (e.g. "anthropic.claude-3-5-sonnet-20241022-v2:0"
+            # or "us.anthropic.claude-sonnet-4-20250514-v1:0").
+            # For application-inference-profile ARNs, it's an opaque ID.
+            # Detect opaque IDs: they won't contain a "." (vendor.model pattern).
+            if "." in resource_id:
+                model = resource_id
+            else:
+                # Opaque application-inference-profile ID — return the full ARN
+                # so callers can detect it and fall back to defaults.
+                return model
 
     # Resolve alias if it matches
     if model in BEDROCK_MODEL_ALIASES:
@@ -183,6 +213,19 @@ def get_bedrock_max_output_tokens(model: str) -> int:
         return BEDROCK_MODEL_METADATA[base_id]["max_output_tokens"]
 
     return 8192
+
+
+def has_bedrock_model_metadata(model: str) -> bool:
+    """Return True if the model has entries in the static metadata table.
+
+    Used by the setup wizard to decide whether to prompt the user for
+    context_length / max_tokens when the model can't be resolved.
+    """
+    try:
+        get_bedrock_context_length(model)
+        return True
+    except KeyError:
+        return False
 
 
 # ---------------------------------------------------------------------------
