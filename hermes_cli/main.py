@@ -2463,7 +2463,7 @@ def _model_flow_bedrock(config, current_model=""):
         elif auth_choice == "3":
             # IAM instance role — nothing to configure
             print("  ✓ Will use IAM instance role for authentication.")
-            print("    Make sure the instance has bedrock:InvokeModel permissions.")
+            print("    Make sure the instance has bedrock:InvokeModel and bedrock:InvokeModelWithResponseStream permissions.")
 
         elif auth_choice == "4":
             return
