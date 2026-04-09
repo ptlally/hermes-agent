@@ -192,6 +192,16 @@ def _has_any_provider_configured() -> bool:
         _model_name = ""
     _has_hermes_config = _model_name and _model_name != _DEFAULT_MODEL
 
+    # Bedrock with IAM role auth: if the user has explicitly configured
+    # provider=bedrock in config, credentials come from the instance metadata
+    # service (no env vars needed). Trust the config.
+    if _has_hermes_config:
+        _provider = ""
+        if isinstance(model_cfg, dict):
+            _provider = (model_cfg.get("provider") or "").strip().lower()
+        if _provider in ("bedrock", "aws-bedrock", "aws"):
+            return True
+
     # Check env vars (may be set by .env or shell).
     # OPENAI_BASE_URL alone counts — local models (vLLM, llama.cpp, etc.)
     # often don't require an API key.
@@ -942,7 +952,7 @@ def select_provider_and_model():
         ("copilot-acp", "GitHub Copilot ACP (spawns `copilot --acp --stdio`)"),
         ("copilot", "GitHub Copilot (uses GITHUB_TOKEN or gh auth token)"),
         ("anthropic", "Anthropic (Claude models — API key or Claude Code)"),
-        ("bedrock", "AWS Bedrock (Claude models via AWS credentials)"),
+        ("bedrock", "AWS Bedrock (Bedrock models via AWS credentials)"),
         ("zai", "Z.AI / GLM (Zhipu AI direct API)"),
         ("kimi-coding", "Kimi / Moonshot (Moonshot AI direct API)"),
         ("minimax", "MiniMax (global direct API)"),
@@ -1235,6 +1245,26 @@ def _model_flow_openai_codex(config, current_model=""):
         print("No change.")
 
 
+def _parse_token_count(raw: str) -> "int | None":
+    """Parse a human-friendly token count string.
+
+    Supports: 200000, 200,000, 200k, 200K, 1m, 1M, 1.2m, 1.2M
+    Returns None if unparseable or non-positive.
+    """
+    s = raw.strip().replace(",", "").lower()
+    if not s:
+        return None
+    try:
+        if s.endswith("m"):
+            val = int(float(s[:-1]) * 1_000_000)
+        elif s.endswith("k"):
+            val = int(float(s[:-1]) * 1_000)
+        else:
+            val = int(s)
+        return val if val > 0 else None
+    except (ValueError, OverflowError):
+        return None
+
 
 def _model_flow_custom(config):
     """Custom endpoint: collect URL, API key, and model name.
@@ -1328,13 +1358,9 @@ def _model_flow_custom(config):
 
     context_length = None
     if context_length_str:
-        try:
-            context_length = int(context_length_str.replace(",", "").replace("k", "000").replace("K", "000"))
-            if context_length <= 0:
-                context_length = None
-        except ValueError:
+        context_length = _parse_token_count(context_length_str)
+        if context_length is None:
             print(f"Invalid context length: {context_length_str} — will auto-detect.")
-            context_length = None
 
     if model_name:
         _save_model_choice(model_name)
@@ -2354,6 +2380,7 @@ def _model_flow_bedrock(config, current_model=""):
         get_env_value("AWS_SECRET_ACCESS_KEY")
         or os.getenv("AWS_SECRET_ACCESS_KEY", "")
     ).strip()
+    existing_profile = os.getenv("AWS_PROFILE", "").strip()
     has_creds = has_usable_secret(existing_access_key) and has_usable_secret(existing_secret_key)
 
     if has_creds:
@@ -2376,36 +2403,75 @@ def _model_flow_bedrock(config, current_model=""):
     if not has_creds:
         print()
         print("  Configure AWS credentials for Bedrock.")
-        print("  Get access keys at: https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html")
+        print()
+        print("    1. Enter AWS Access Key ID / Secret Key")
+        print("    2. Use AWS Profile (from ~/.aws/credentials)")
+        print("    3. Use IAM instance role (EC2/ECS — no keys needed)")
+        print("    4. Cancel")
         print()
         try:
-            access_key = input("  AWS Access Key ID: ").strip()
+            auth_choice = input("  Choice [1/2/3/4]: ").strip()
         except (KeyboardInterrupt, EOFError):
             print()
             return
-        if not access_key:
-            print("  Cancelled.")
-            return
-        try:
-            import getpass
-            secret_key = getpass.getpass("  AWS Secret Access Key: ").strip()
-        except (KeyboardInterrupt, EOFError):
+
+        if auth_choice == "1":
+            # Explicit access keys
             print()
+            print("  Get access keys at: https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html")
+            print()
+            try:
+                access_key = input("  AWS Access Key ID: ").strip()
+            except (KeyboardInterrupt, EOFError):
+                print()
+                return
+            if not access_key:
+                print("  Cancelled.")
+                return
+            try:
+                import getpass
+                secret_key = getpass.getpass("  AWS Secret Access Key: ").strip()
+            except (KeyboardInterrupt, EOFError):
+                print()
+                return
+            if not secret_key:
+                print("  Cancelled.")
+                return
+
+            save_env_value("AWS_ACCESS_KEY_ID", access_key)
+            save_env_value("AWS_SECRET_ACCESS_KEY", secret_key)
+
+            try:
+                session_token = input("  AWS Session Token (optional, press Enter to skip): ").strip()
+            except (KeyboardInterrupt, EOFError):
+                session_token = ""
+            if session_token:
+                save_env_value("AWS_SESSION_TOKEN", session_token)
+            print("  ✓ AWS credentials saved.")
+
+        elif auth_choice == "2":
+            # AWS Profile
+            default_profile = existing_profile or "default"
+            try:
+                profile = input(f"  AWS Profile name [{default_profile}]: ").strip()
+            except (KeyboardInterrupt, EOFError):
+                profile = ""
+            profile = profile or default_profile
+            save_env_value("AWS_PROFILE", profile)
+            print(f"  ✓ AWS Profile set to: {profile}")
+
+        elif auth_choice == "3":
+            # IAM instance role — nothing to configure
+            print("  ✓ Will use IAM instance role for authentication.")
+            print("    Make sure the instance has bedrock:InvokeModel and bedrock:InvokeModelWithResponseStream permissions.")
+
+        elif auth_choice == "4":
             return
-        if not secret_key:
-            print("  Cancelled.")
+        else:
+            print("  Invalid choice.")
             return
 
-        save_env_value("AWS_ACCESS_KEY_ID", access_key)
-        save_env_value("AWS_SECRET_ACCESS_KEY", secret_key)
-
-        try:
-            session_token = input("  AWS Session Token (optional, press Enter to skip): ").strip()
-        except (KeyboardInterrupt, EOFError):
-            session_token = ""
-        if session_token:
-            save_env_value("AWS_SESSION_TOKEN", session_token)
-
+        # Region selection (for all auth methods)
         existing_region = (
             get_env_value("AWS_REGION")
             or os.getenv("AWS_REGION", "")
@@ -2435,8 +2501,36 @@ def _model_flow_bedrock(config, current_model=""):
             model = {"default": model} if model else {}
             cfg["model"] = model
         model["provider"] = "bedrock"
-        model["api_mode"] = "anthropic_messages"
+        model["api_mode"] = "bedrock_converse"
         model.pop("base_url", None)
+
+        # Check if the selected model has known metadata.  ARNs and custom
+        # model IDs may not be in the static table — prompt for context_length
+        # so the compressor uses the right value.  Matches the custom endpoint
+        # flow pattern (auto-detect when left blank).
+        try:
+            from agent.bedrock_adapter import has_bedrock_model_metadata, get_bedrock_model_id
+            resolved_id = get_bedrock_model_id(selected)
+            if not has_bedrock_model_metadata(selected):
+                print()
+                print(f"  ⚠  Model metadata not found for: {resolved_id}")
+                print()
+                try:
+                    ctx_input = input("  Context length in tokens [leave blank for auto-detect]: ").strip()
+                except (KeyboardInterrupt, EOFError):
+                    ctx_input = ""
+                if ctx_input:
+                    ctx_val = _parse_token_count(ctx_input)
+                    if ctx_val:
+                        model["context_length"] = ctx_val
+                        print(f"  ✓ Context length: {ctx_val:,}")
+                    else:
+                        print(f"  Invalid context length: {ctx_input} — will auto-detect.")
+                else:
+                    print("  Will auto-detect context length.")
+        except Exception:
+            pass  # Don't block setup if metadata check fails
+
         save_config(cfg)
         deactivate_provider()
         print(f"  ✓ Default model set to: {selected}")
