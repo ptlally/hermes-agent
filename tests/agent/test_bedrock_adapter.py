@@ -1230,3 +1230,286 @@ class TestEmptyTextBlockFix:
         from agent.bedrock_adapter import _convert_content_to_converse
         blocks = _convert_content_to_converse("Hello")
         assert blocks[0]["text"] == "Hello"
+
+
+# ---------------------------------------------------------------------------
+# Bug condition exploration: inference profile modalities
+# ---------------------------------------------------------------------------
+
+class TestInferenceProfileModalities:
+    """Bug condition exploration tests for inference profile modality resolution.
+
+    These tests encode EXPECTED (correct) behavior: inference profiles should
+    inherit modalities from their underlying foundation model. On unfixed code,
+    they MUST FAIL because profiles get hardcoded ["TEXT"] instead.
+
+    **Validates: Requirements 1.1, 1.2, 1.3, 2.1, 2.2, 2.3, 2.4**
+    """
+
+    @pytest.mark.parametrize("prefix", ["us.", "global.", "eu."])
+    def test_inference_profile_inherits_foundation_model_modalities(self, prefix):
+        """Profile wrapping a multi-modal foundation model should carry its modalities.
+
+        **Validates: Requirements 2.1, 2.2, 2.3**
+        """
+        from agent.bedrock_adapter import discover_bedrock_models, reset_discovery_cache
+
+        reset_discovery_cache()
+
+        mock_client = MagicMock()
+        mock_client.list_foundation_models.return_value = {
+            "modelSummaries": [{
+                "modelId": "anthropic.claude-sonnet-4-6",
+                "modelName": "Claude Sonnet 4.6",
+                "providerName": "Anthropic",
+                "inputModalities": ["TEXT", "IMAGE"],
+                "outputModalities": ["TEXT"],
+                "responseStreamingSupported": True,
+                "modelLifecycle": {"status": "ACTIVE"},
+            }],
+        }
+        mock_client.list_inference_profiles.return_value = {
+            "inferenceProfileSummaries": [{
+                "inferenceProfileId": f"{prefix}anthropic.claude-sonnet-4-6",
+                "inferenceProfileName": "Anthropic Claude Sonnet 4.6",
+                "status": "ACTIVE",
+                "models": [{"modelArn": "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-sonnet-4-6"}],
+            }],
+        }
+
+        with patch("agent.bedrock_adapter._get_bedrock_control_client", return_value=mock_client):
+            models = discover_bedrock_models("us-east-1")
+
+        # Find the inference profile entry (not the foundation model)
+        profile_entry = next(
+            (m for m in models if m["id"] == f"{prefix}anthropic.claude-sonnet-4-6"),
+            None,
+        )
+        assert profile_entry is not None, (
+            f"Inference profile '{prefix}anthropic.claude-sonnet-4-6' not found in results"
+        )
+        assert profile_entry["input_modalities"] == ["TEXT", "IMAGE"], (
+            f"Expected input_modalities ['TEXT', 'IMAGE'] but got {profile_entry['input_modalities']}"
+        )
+
+    def test_unmatched_inference_profile_falls_back_to_text(self):
+        """Profile with no matching foundation model should default to ["TEXT"].
+
+        **Validates: Requirements 2.4**
+        """
+        from agent.bedrock_adapter import discover_bedrock_models, reset_discovery_cache
+
+        reset_discovery_cache()
+
+        mock_client = MagicMock()
+        mock_client.list_foundation_models.return_value = {
+            "modelSummaries": [],
+        }
+        mock_client.list_inference_profiles.return_value = {
+            "inferenceProfileSummaries": [{
+                "inferenceProfileId": "us.unknown-vendor.mystery-model",
+                "inferenceProfileName": "Mystery Model",
+                "status": "ACTIVE",
+                "models": [{"modelArn": "arn:aws:bedrock:us-east-1::foundation-model/unknown-vendor.mystery-model"}],
+            }],
+        }
+
+        with patch("agent.bedrock_adapter._get_bedrock_control_client", return_value=mock_client):
+            models = discover_bedrock_models("us-east-1")
+
+        profile_entry = next(
+            (m for m in models if m["id"] == "us.unknown-vendor.mystery-model"),
+            None,
+        )
+        assert profile_entry is not None, (
+            "Inference profile 'us.unknown-vendor.mystery-model' not found in results"
+        )
+        assert profile_entry["input_modalities"] == ["TEXT"], (
+            f"Expected fallback input_modalities ['TEXT'] but got {profile_entry['input_modalities']}"
+        )
+        assert profile_entry["output_modalities"] == ["TEXT"], (
+            f"Expected fallback output_modalities ['TEXT'] but got {profile_entry['output_modalities']}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Preservation tests: baseline behavior of discover_bedrock_models()
+# ---------------------------------------------------------------------------
+
+class TestDiscoverBedrockModelsPreservation:
+    """Preservation tests that capture baseline behavior unrelated to
+    inference profile modality assignment.  These MUST PASS on unfixed code.
+
+    **Validates: Requirements 3.1, 3.2, 3.3, 3.4, 3.5**
+    """
+
+    def test_foundation_model_preserves_actual_modalities(self):
+        """Foundation model entries carry their real modalities from the API.
+
+        **Validates: Requirements 3.1**
+        """
+        from agent.bedrock_adapter import discover_bedrock_models, reset_discovery_cache
+
+        reset_discovery_cache()
+
+        mock_client = MagicMock()
+        mock_client.list_foundation_models.return_value = {
+            "modelSummaries": [{
+                "modelId": "anthropic.claude-sonnet-4-6-20250514-v1:0",
+                "modelName": "Claude Sonnet 4.6",
+                "providerName": "Anthropic",
+                "inputModalities": ["TEXT", "IMAGE"],
+                "outputModalities": ["TEXT"],
+                "responseStreamingSupported": True,
+                "modelLifecycle": {"status": "ACTIVE"},
+            }],
+        }
+        mock_client.list_inference_profiles.return_value = {
+            "inferenceProfileSummaries": [],
+        }
+
+        with patch("agent.bedrock_adapter._get_bedrock_control_client", return_value=mock_client):
+            models = discover_bedrock_models("us-east-1")
+
+        fm = next(m for m in models if m["id"] == "anthropic.claude-sonnet-4-6-20250514-v1:0")
+        assert fm["input_modalities"] == ["TEXT", "IMAGE"]
+        assert fm["output_modalities"] == ["TEXT"]
+
+    def test_inactive_inference_profile_skipped(self):
+        """Inference profiles with status != ACTIVE are excluded.
+
+        **Validates: Requirements 3.3**
+        """
+        from agent.bedrock_adapter import discover_bedrock_models, reset_discovery_cache
+
+        reset_discovery_cache()
+
+        mock_client = MagicMock()
+        mock_client.list_foundation_models.return_value = {"modelSummaries": []}
+        mock_client.list_inference_profiles.return_value = {
+            "inferenceProfileSummaries": [{
+                "inferenceProfileId": "us.anthropic.claude-old-model",
+                "inferenceProfileName": "Old Claude",
+                "status": "INACTIVE",
+                "models": [{"modelArn": "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-old-model"}],
+            }],
+        }
+
+        with patch("agent.bedrock_adapter._get_bedrock_control_client", return_value=mock_client):
+            models = discover_bedrock_models("us-east-1")
+
+        ids = [m["id"] for m in models]
+        assert "us.anthropic.claude-old-model" not in ids
+
+    def test_duplicate_profile_id_skipped(self):
+        """Profile whose ID (lowercased) was already seen as a foundation model is skipped.
+
+        **Validates: Requirements 3.4**
+        """
+        from agent.bedrock_adapter import discover_bedrock_models, reset_discovery_cache
+
+        reset_discovery_cache()
+
+        mock_client = MagicMock()
+        mock_client.list_foundation_models.return_value = {
+            "modelSummaries": [{
+                "modelId": "anthropic.claude-sonnet-4-6",
+                "modelName": "Claude Sonnet 4.6",
+                "providerName": "Anthropic",
+                "inputModalities": ["TEXT", "IMAGE"],
+                "outputModalities": ["TEXT"],
+                "responseStreamingSupported": True,
+                "modelLifecycle": {"status": "ACTIVE"},
+            }],
+        }
+        mock_client.list_inference_profiles.return_value = {
+            "inferenceProfileSummaries": [{
+                "inferenceProfileId": "anthropic.claude-sonnet-4-6",
+                "inferenceProfileName": "Claude Sonnet 4.6 Profile",
+                "status": "ACTIVE",
+                "models": [{"modelArn": "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-sonnet-4-6"}],
+            }],
+        }
+
+        with patch("agent.bedrock_adapter._get_bedrock_control_client", return_value=mock_client):
+            models = discover_bedrock_models("us-east-1")
+
+        matching = [m for m in models if m["id"] == "anthropic.claude-sonnet-4-6"]
+        assert len(matching) == 1
+
+    def test_caching_returns_cached_results(self):
+        """Second call with same region returns cached data; API called only once.
+
+        **Validates: Requirements 3.5**
+        """
+        from agent.bedrock_adapter import discover_bedrock_models, reset_discovery_cache
+
+        reset_discovery_cache()
+
+        mock_client = MagicMock()
+        mock_client.list_foundation_models.return_value = {
+            "modelSummaries": [{
+                "modelId": "anthropic.claude-v2",
+                "modelName": "Claude v2",
+                "providerName": "Anthropic",
+                "inputModalities": ["TEXT"],
+                "outputModalities": ["TEXT"],
+                "responseStreamingSupported": True,
+                "modelLifecycle": {"status": "ACTIVE"},
+            }],
+        }
+        mock_client.list_inference_profiles.return_value = {
+            "inferenceProfileSummaries": [],
+        }
+
+        with patch("agent.bedrock_adapter._get_bedrock_control_client", return_value=mock_client):
+            first = discover_bedrock_models("us-east-1")
+            second = discover_bedrock_models("us-east-1")
+
+        assert mock_client.list_foundation_models.call_count == 1
+        assert first == second
+
+    def test_provider_filter_applies_to_profiles(self):
+        """provider_filter excludes non-matching inference profiles.
+
+        **Validates: Requirements 3.2**
+        """
+        from agent.bedrock_adapter import discover_bedrock_models, reset_discovery_cache
+
+        reset_discovery_cache()
+
+        mock_client = MagicMock()
+        mock_client.list_foundation_models.return_value = {
+            "modelSummaries": [{
+                "modelId": "anthropic.claude-v2",
+                "modelName": "Claude v2",
+                "providerName": "Anthropic",
+                "inputModalities": ["TEXT"],
+                "outputModalities": ["TEXT"],
+                "responseStreamingSupported": True,
+                "modelLifecycle": {"status": "ACTIVE"},
+            }],
+        }
+        mock_client.list_inference_profiles.return_value = {
+            "inferenceProfileSummaries": [
+                {
+                    "inferenceProfileId": "us.anthropic.claude-v2",
+                    "inferenceProfileName": "US Claude v2",
+                    "status": "ACTIVE",
+                    "models": [{"modelArn": "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-v2"}],
+                },
+                {
+                    "inferenceProfileId": "us.meta.llama3-70b",
+                    "inferenceProfileName": "US Llama 3 70B",
+                    "status": "ACTIVE",
+                    "models": [{"modelArn": "arn:aws:bedrock:us-east-1::foundation-model/meta.llama3-70b"}],
+                },
+            ],
+        }
+
+        with patch("agent.bedrock_adapter._get_bedrock_control_client", return_value=mock_client):
+            models = discover_bedrock_models("us-east-1", provider_filter=["anthropic"])
+
+        ids = [m["id"] for m in models]
+        assert "us.anthropic.claude-v2" in ids
+        assert "us.meta.llama3-70b" not in ids

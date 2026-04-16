@@ -222,6 +222,19 @@ def _model_supports_tool_use(model_id: str) -> bool:
     return not any(pattern in model_lower for pattern in _NON_TOOL_CALLING_PATTERNS)
 
 
+def _strip_regional_prefix(model_id: str) -> str:
+    """Strip regional/global inference profile prefix from a Bedrock model ID.
+
+    Handles: us., global., eu., ap., jp.
+    Returns the model ID unchanged if no known prefix is found.
+    """
+    model_lower = model_id.lower()
+    for prefix in ("us.", "global.", "eu.", "ap.", "jp."):
+        if model_lower.startswith(prefix):
+            return model_id[len(prefix):]
+    return model_id
+
+
 def is_anthropic_bedrock_model(model_id: str) -> bool:
     """Return True if the model is an Anthropic Claude model on Bedrock.
 
@@ -235,13 +248,7 @@ def is_anthropic_bedrock_model(model_id: str) -> bool:
       - ``global.anthropic.claude-*`` (global inference profiles)
       - ``eu.anthropic.claude-*`` (EU inference profiles)
     """
-    model_lower = model_id.lower()
-    # Strip regional prefix if present
-    for prefix in ("us.", "global.", "eu.", "ap.", "jp."):
-        if model_lower.startswith(prefix):
-            model_lower = model_lower[len(prefix):]
-            break
-    return model_lower.startswith("anthropic.claude")
+    return _strip_regional_prefix(model_id).lower().startswith("anthropic.claude")
 
 
 # ---------------------------------------------------------------------------
@@ -872,6 +879,9 @@ def discover_bedrock_models(
     seen_ids = set()
     filter_set = {f.lower() for f in (provider_filter or [])}
 
+    # Build modality lookup from foundation models for inference profile resolution
+    modality_map: Dict[str, Dict[str, list]] = {}
+
     # 1. Discover foundation models
     try:
         response = client.list_foundation_models()
@@ -906,6 +916,10 @@ def discover_bedrock_models(
                 "streaming": True,
             })
             seen_ids.add(model_id.lower())
+            modality_map[model_id.lower()] = {
+                "input": summary.get("inputModalities", ["TEXT"]),
+                "output": output_mods,
+            }
     except Exception as e:
         logger.warning("Failed to list Bedrock foundation models: %s", e)
 
@@ -943,12 +957,18 @@ def discover_bedrock_models(
                 if not matches:
                     continue
 
+            # Resolve modalities from the underlying foundation model
+            base_id = _strip_regional_prefix(profile_id).lower()
+            matched_modalities = modality_map.get(base_id)
+            input_mods = matched_modalities["input"] if matched_modalities else ["TEXT"]
+            output_mods_profile = matched_modalities["output"] if matched_modalities else ["TEXT"]
+
             models.append({
                 "id": profile_id,
                 "name": (profile.get("inferenceProfileName") or profile_id).strip(),
                 "provider": "inference-profile",
-                "input_modalities": ["TEXT"],
-                "output_modalities": ["TEXT"],
+                "input_modalities": input_mods,
+                "output_modalities": output_mods_profile,
                 "streaming": True,
             })
             seen_ids.add(profile_id.lower())
